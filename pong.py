@@ -21,7 +21,7 @@ from policy_network import Network
 parser = argparse.ArgumentParser()
 parser.add_argument('--name', type=str, default='Pong')
 parser.add_argument('--train-ae', type=bool, default=False)
-parser.add_argument('--switch-step', type=int, default=14000)       # Episode to switch from ae training to policy training
+parser.add_argument('--switch-step', type=int, default=7000)       # Episode to switch from ae training to policy training
 parser.add_argument('--hidden_layer_size', type=int, default=200)
 parser.add_argument('--learning_rate', type=float, default=0.0005)
 parser.add_argument('--batch_size_episodes', type=int, default=1)

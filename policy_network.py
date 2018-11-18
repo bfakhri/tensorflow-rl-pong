@@ -6,10 +6,12 @@ OBSERVATIONS_SIZE = 6400
 
 
 class Network:
-    def __init__(self, hidden_layer_size, learning_rate, checkpoints_dir):
+    def __init__(self, hidden_layer_size, learning_rate, checkpoints_dir, writer):
         self.learning_rate = learning_rate
 
         self.sess = tf.InteractiveSession()
+
+        self.writer = writer
 
         self.observations = tf.placeholder(tf.float32,
                                            [None, OBSERVATIONS_SIZE])
@@ -26,7 +28,7 @@ class Network:
                 kernel_initializer=tf.contrib.layers.xavier_initializer())
 
         with tf.variable_scope('Decoder'):
-            x_hat = tf.layers.dense(
+            self.x_hat = tf.layers.dense(
                 h,
                 units=OBSERVATIONS_SIZE,
                 activation=tf.nn.relu,
@@ -54,14 +56,17 @@ class Network:
             labels=self.sampled_actions,
             predictions=self.up_probability,
             weights=self.advantage)
+        self.ae_loss = tf.losses.mean_squared_error(self.observations, self.x_hat)
         optimizer = tf.train.AdamOptimizer(self.learning_rate)
         self.train_op = optimizer.minimize(self.loss)
+        self.train_ae_op = optimizer.minimize(self.ae_loss)
 
         tf.global_variables_initializer().run()
 
         self.saver = tf.train.Saver()
-        self.checkpoint_file = os.path.join(checkpoints_dir,
-                                            'policy_network.ckpt')
+        self.checkpoint_file = os.path.join(checkpoints_dir, 'policy_network.ckpt') 
+        self.writer.add_graph(self.sess.graph) 
+
 
     def load_checkpoint(self):
         print("Loading checkpoint...")
@@ -77,7 +82,7 @@ class Network:
             feed_dict={self.observations: observations.reshape([1, -1])})
         return up_probability
 
-    def train(self, state_action_reward_tuples):
+    def train(self, state_action_reward_tuples, episode_n, train_ae_only=False):
         print("Training with %d (state, action, reward) tuples" %
               len(state_action_reward_tuples))
 
@@ -91,4 +96,16 @@ class Network:
             self.sampled_actions: actions,
             self.advantage: rewards
         }
-        self.sess.run(self.train_op, feed_dict)
+
+        if(train_ae_only):
+            _, pi_loss, ae_loss, re_img = self.sess.run([self.train_ae_op, self.loss, self.ae_loss, self.x_hat], feed_dict)
+        else:
+            _, pi_loss, ae_loss, re_img = self.sess.run([self.train_op, self.loss, self.ae_loss, self.x_hat], feed_dict)
+        # Writeout to TB
+        summary_pi = tf.Summary(value=[tf.Summary.Value(tag='Policy-LogLoss', simple_value=pi_loss)])
+        summary_ae = tf.Summary(value=[tf.Summary.Value(tag='Recon_Loss', simple_value=ae_loss)])
+        #summary_og_img = tf.Summary(value=[tf.Summary.Value(tag='OG_Image', image=states[:3])])
+        #summary_re_img = tf.Summary(value=[tf.Summary.Value(tag='Re_Image', image=tf.summary.image('Recon', self.x_hat[:3]))])
+        #summary_re_img = tf.Summary(value=tf.summary.image('Recon', self.x_hat))
+        self.writer.add_summary(summary_pi, episode_n)
+        self.writer.add_summary(summary_ae, episode_n)

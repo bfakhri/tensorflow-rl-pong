@@ -14,10 +14,14 @@ import argparse
 import pickle
 import numpy as np
 import gym
+import tensorflow as tf
 
 from policy_network import Network
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--name', type=str, default='Pong')
+parser.add_argument('--train-ae', type=bool, default=False)
+parser.add_argument('--switch-step', type=int, default=14000)       # Episode to switch from ae training to policy training
 parser.add_argument('--hidden_layer_size', type=int, default=200)
 parser.add_argument('--learning_rate', type=float, default=0.0005)
 parser.add_argument('--batch_size_episodes', type=int, default=1)
@@ -26,6 +30,10 @@ parser.add_argument('--load_checkpoint', action='store_true')
 parser.add_argument('--discount_factor', type=int, default=0.99)
 parser.add_argument('--render', action='store_true')
 args = parser.parse_args()
+
+# Log settings
+BASE_LOGDIR = './logs/'
+writer = tf.summary.FileWriter(BASE_LOGDIR + args.name)
 
 # Action values to send to gym environment to move paddle up/down
 UP_ACTION = 2
@@ -61,10 +69,12 @@ def discount_rewards(rewards, discount_factor):
 
 env = gym.make('Pong-v0')
 
-network = Network(
-    args.hidden_layer_size, args.learning_rate, checkpoints_dir='checkpoints')
+network = Network(args.hidden_layer_size, args.learning_rate, checkpoints_dir='checkpoints', writer=writer)
 if args.load_checkpoint:
     network.load_checkpoint()
+
+# Tensorboard stuff
+all_summaries = tf.summary.merge_all()
 
 batch_state_action_reward_tuples = []
 smoothed_reward = None
@@ -123,13 +133,33 @@ while True:
     print("Reward total was %.3f; discounted moving average of reward is %.3f" \
         % (episode_reward_sum, smoothed_reward))
 
+    # Writeout to TB
+    summary_s = tf.Summary(value=[tf.Summary.Value(tag='RewardSum', simple_value=episode_reward_sum)])
+    summary_a = tf.Summary(value=[tf.Summary.Value(tag='RewardDisc', simple_value=smoothed_reward)])
+    writer.add_summary(summary_s, episode_n)
+    writer.add_summary(summary_a, episode_n)
+
+    writer.flush()
+
     if episode_n % args.batch_size_episodes == 0:
         states, actions, rewards = zip(*batch_state_action_reward_tuples)
         rewards = discount_rewards(rewards, args.discount_factor)
         rewards -= np.mean(rewards)
         rewards /= np.std(rewards)
         batch_state_action_reward_tuples = list(zip(states, actions, rewards))
-        network.train(batch_state_action_reward_tuples)
+
+        # Logic to switch training Autoencoder to policy
+        if(args.train_ae):
+            if(episode_n < args.switch_step):
+                print('Training AE')
+                network.train(batch_state_action_reward_tuples, episode_n, train_ae_only=True)
+            else:
+                print('Training Policy')
+                network.train(batch_state_action_reward_tuples, episode_n, train_ae_only=False)
+        else:
+            print('Only Training Policy')
+            network.train(batch_state_action_reward_tuples, episode_n, train_ae_only=False)
+
         batch_state_action_reward_tuples = []
 
     if episode_n % args.checkpoint_every_n_episodes == 0:

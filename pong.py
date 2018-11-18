@@ -149,7 +149,7 @@ while True:
         batch_state_action_reward_tuples = list(zip(states, actions, rewards))
 
         # Logic to switch training Autoencoder to policy
-        if(args.train_ae):
+        if(args.train_ae is True):
             if(episode_n < args.switch_step):
                 print('Training AE')
                 network.train(batch_state_action_reward_tuples, episode_n, train_ae_only=True)
